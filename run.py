@@ -7,13 +7,13 @@ import collections
 import datetime
 from sys import stdout
 from time import sleep
+from os.path import basename
 
 from requests.exceptions import ConnectionError
 import xlwt
 from xlrd import open_workbook
 from requests.models import Request
 from requests.sessions import Session
-
 
 
 # NAME_COLUMN: the column in the excel sheet that hold the name to be read
@@ -81,7 +81,7 @@ class Client(object):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--filename', dest='filename', required=True, help='')
+    parser.add_argument('--file', dest='file', required=True, help='')
     return vars(parser.parse_args())
 
 
@@ -95,7 +95,7 @@ def run(args):
     # read
 
     client = Client()
-    read_file = os.path.join(os.path.dirname(__file__), '', args['filename'])
+    read_file = os.path.join(os.path.dirname(__file__), '', args['file'])
     read_sheet = open_workbook(read_file).sheet_by_index(0)
     data = []
 
@@ -103,7 +103,7 @@ def run(args):
     sheet_rows = read_sheet.nrows
     chunks = (sheet_rows / chunck_size) + (sheet_rows % chunck_size)
 
-    for chunk in chunks:
+    for chunk in xrange(chunks):
         params = OrderedDict()
         for chunk_item in xrange(chunck_size):
             row_num = (chunk * chunck_size) + chunk_item
@@ -161,7 +161,7 @@ def run(args):
         stdout.flush()
     stdout.write('\n')
 
-    workbook.save('output.xls')
+    workbook.save('{}_genderized.xls'.format(basename(args['file']).split('.')[0]))
 
 
 if __name__ == '__main__':
