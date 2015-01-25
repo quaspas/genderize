@@ -30,3 +30,12 @@ Changing Some Settings
 0 maps to column A, 1 maps to column B, etc.
 
     WRITE_COLUMN = 13
+
+
+*NOTE:* You will need some python packages to run this. Easiest way to get them is to install using `pip`.
+
+    >> pip install xlrd xlwt requests
+
+If you do not have `pip` easiest way to install `pip` is with `easy_install`.
+
+    >> sudo easy_install pip
