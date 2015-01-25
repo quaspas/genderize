@@ -1,4 +1,5 @@
 # coding: utf-8
+from collections import OrderedDict
 import os
 import argparse
 import json
@@ -8,11 +9,11 @@ from sys import stdout
 from time import sleep
 
 from requests.exceptions import ConnectionError
-
 import xlwt
 from xlrd import open_workbook
 from requests.models import Request
 from requests.sessions import Session
+
 
 
 # NAME_COLUMN: the column in the excel sheet that hold the name to be read
@@ -22,6 +23,10 @@ NAME_COLUMN = 1
 # PROBABILITY: The minimum probability needed to assign a gender
 # an integer from 0 to 100
 PROBABILITY = 95
+
+# WRITE_COLUMN: the column that results will be written in (male as M and female as F)
+# 0 = column A, 1 = column B, etc.
+WRITE_COLUMN = 13
 
 
 def timed(method):
@@ -41,12 +46,6 @@ class Response(collections.Sequence):
         self.response = response
         content = response.content.decode('utf-8')
         self.content = json.loads(content)
-        self.count = self.content.get('count')
-        self.gender = self.content.get('gender')
-        if self.content.get('probability'):
-            self.probability = int(float(self.content.get('probability'))*100)
-        else:
-            self.probability = 0
 
     def __len__(self):
         return len(self.content)
@@ -64,9 +63,6 @@ class Client(object):
     HOST = 'api.genderize.io'
 
     def curl(self, method, params=None):
-        name = params['name'].lower()
-        if name in _CACHE:
-            return _CACHE[name]
         url = '{scheme}://{host}'.format(scheme=self.SCHEME, host=self.HOST)
         params = params or {}
         session = Session()
@@ -75,12 +71,11 @@ class Client(object):
         while True:
             response = session.send(request)
             if response.status_code == 200:
-                _CACHE[name] = Response(response)
                 break
             elif response.status_code == 429:
                 stdout.write('\n')
                 print response.content
-                sleep(10)
+                sleep(5)
         return Response(response)
 
 
@@ -104,20 +99,49 @@ def run(args):
     read_sheet = open_workbook(read_file).sheet_by_index(0)
     data = []
 
-    for row_num in range(10):
-    # for row_num in range(read_sheet.nrows):
-        name = read_sheet.row(row_num)[NAME_COLUMN].value
-        if name:
-            params = {'name': name}
-            try:
-                response = client.curl('GET', params)
-            except ConnectionError:
-                client = Client()
-                response = client.curl('GET', params)
-            row = [str(r.value).rstrip('.0') for r in read_sheet.row(row_num)]
-            if response.probability >= PROBABILITY:
-                row.append(response.gender)
-        data.append(row)
+    chunck_size = 20
+    sheet_rows = read_sheet.nrows
+    chunks = (sheet_rows / chunck_size) + (sheet_rows % chunck_size)
+
+    for chunk in chunks:
+        params = OrderedDict()
+        for chunk_item in xrange(chunck_size):
+            row_num = (chunk * chunck_size) + chunk_item
+            if row_num > sheet_rows:
+                break
+
+            name = read_sheet.row(row_num)[NAME_COLUMN].value.lower()
+            params['name[{}]'.format(chunk_item)] = name
+
+        # send request
+        try:
+            response = client.curl('GET', params)
+        except ConnectionError:
+            client = Client()
+            response = client.curl('GET', params)
+
+        # match request with row
+        for chunk_item, res in zip(xrange(chunck_size), response.content):
+            current_row = (chunk * chunck_size) + chunk_item
+            if current_row > sheet_rows:
+                break
+
+            row = []
+            for cell in read_sheet.row(current_row):
+                if cell.ctype == 5:
+                    row.append('')
+                else:
+                    row.append(str(cell.value).rstrip('.0'))
+
+            if res.get('probability'):
+                probability = int(float(res.get('probability'))*100)
+            else:
+                probability = 0
+            if probability > PROBABILITY:
+                if not row[WRITE_COLUMN]:
+                    row[WRITE_COLUMN] = res.get('gender')[0].upper()
+
+            data.append(row)
 
         stdout.write('\r\t{} / {}'.format(row_num, read_sheet.nrows))
         stdout.flush()
