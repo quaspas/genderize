@@ -12,24 +12,30 @@ How Do I Run It?
 
     >> python genderize.py --file /path/to/my/excel_file.xls
 
-There are some variables in `genderize.py` you may want to alter.
 
-Changing Some Settings
-----------------------
+This will read column B of each row in `excel_file.xls` and add a cell on the end of the row if the probability of 
+the results being correct are at least 95%.
 
-`NAME_COLUMN`: The column in the excel sheet that holds the name to be read. 
-0 maps to column A, 1 maps to column B, etc.
 
-    NAME_COLUMN = 1
+Options
+-------
 
-`PROBABILITY`: The minimum probability needed to assign a gender. Use an integer from 0 to 100.
+You can pass optional arguments `-r`, `-w`, and `-p`.
 
-    PROBABILITY = 95
+`-r` read column: The column in the excel sheet that hold the name to be read
+        0 = column A, 1 = column B, etc.
+        
+`-w` write column: The column that results will be written into (male as M and female as F).
+        0 = column A, 1 = column B, etc.
+        If nothing is passed a column will be appended to the end of rows.
+        
+`-p` minimum probability: The minimum probability needed to assign a gender. An integer from 0 to 100.
+        Default is 95.
 
-`WRITE_COLUMN`: The column that results will be written in (male as M and female as F). Only blank fields will be written into. If you already have gender data in a field it will not be overwritten.
-0 maps to column A, 1 maps to column B, etc.
+Example usage:
 
-    WRITE_COLUMN = 13
+    >> python genderize.py --file /path/to/my/excel_file.xls -p 80 -r 5 -w 13
+
 
 
 *NOTE:* You will need some python packages to run this. Easiest way to get them is to install using `pip`.
