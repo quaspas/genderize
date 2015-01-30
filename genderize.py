@@ -16,19 +16,6 @@ from requests.models import Request
 from requests.sessions import Session
 
 
-# NAME_COLUMN: the column in the excel sheet that hold the name to be read
-# 0 = column A, 1 = column B, etc.
-NAME_COLUMN = 1
-
-# PROBABILITY: The minimum probability needed to assign a gender
-# an integer from 0 to 100
-PROBABILITY = 95
-
-# WRITE_COLUMN: the column that results will be written in (male as M and female as F)
-# 0 = column A, 1 = column B, etc.
-WRITE_COLUMN = 13
-
-
 def timed(method):
     def wrapper(*args, **kw):
         start = datetime.datetime.now()
@@ -81,12 +68,61 @@ class Client(object):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--file', dest='file', required=True, help='')
+    parser.add_argument(
+        '--file',
+        dest='file',
+        required=True,
+        help='Path to the .xsl file to be read. It will not be overwritten.'
+    )
+    parser.add_argument(
+        '-r', '--read',
+        dest='read_col',
+        type=int,
+        default=1,
+        required=False,
+        help="""
+        The column in the excel sheet that hold the name to be read
+        0 = column A, 1 = column B, etc.
+        """
+    )
+    parser.add_argument(
+        '-w', '--write',
+        dest='write_col',
+        default=False,
+        type=int,
+        required=False,
+        help="""
+        The column that results will be written into (male as M and female as F).
+        0 = column A, 1 = column B, etc.
+        If nothing is passed a column will be appended to the end of rows.
+        """
+    )
+    parser.add_argument(
+        '-p', '--prob',
+        dest='min_probability',
+        default=95,
+        type=int,
+        required=False,
+        help="""
+        The minimum probability needed to assign a gender. An integer from 0 to 100.
+        Default is 95.
+        """
+    )
     return vars(parser.parse_args())
+
+
+def open_sheet(file_name):
+    read_file = os.path.join(os.path.dirname(__file__), '', file_name)
+    sheet = open_workbook(read_file).sheet_by_index(0)
+    return sheet
 
 
 @timed
 def run(args):
+
+    read_col = args['read_col']
+    write_col = args['write_col']
+    min_probability = args['min_probability']
 
     print '-'*80
     print 'Reading'
@@ -95,23 +131,26 @@ def run(args):
     # read
 
     client = Client()
-    read_file = os.path.join(os.path.dirname(__file__), '', args['file'])
-    read_sheet = open_workbook(read_file).sheet_by_index(0)
+    read_sheet = open_sheet(args['file'])
     data = []
-
-    chunck_size = 20
+    chunck_size = 100
     sheet_rows = read_sheet.nrows
     chunks = (sheet_rows / chunck_size) + (sheet_rows % chunck_size)
 
     for chunk in xrange(chunks):
+
         params = OrderedDict()
+
         for chunk_item in xrange(chunck_size):
             row_num = (chunk * chunck_size) + chunk_item
             if row_num > sheet_rows:
                 break
 
-            name = read_sheet.row(row_num)[NAME_COLUMN].value.lower()
-            params['name[{}]'.format(chunk_item)] = name
+            try:
+                name = read_sheet.row(row_num)[read_col].value.lower()
+                params['name[{}]'.format(chunk_item)] = name
+            except IndexError:
+                pass
 
         # send request
         try:
@@ -137,9 +176,12 @@ def run(args):
                 probability = int(float(res.get('probability'))*100)
             else:
                 probability = 0
-            if probability > PROBABILITY:
-                if not row[WRITE_COLUMN]:
-                    row[WRITE_COLUMN] = res.get('gender')[0].upper()
+            if probability >= min_probability:
+                if write_col:
+                    if not row[write_col]:
+                        row[write_col] = res.get('gender')[0].upper()
+                else:
+                    row.append(res.get('gender')[0].upper())
 
             data.append(row)
 
