@@ -55,13 +55,15 @@ class Client(object):
         session = Session()
         request = Request(method, url, params=params)
         request = request.prepare()
-        while True:
+        retries = 0
+        while retries < 2:
             response = session.send(request)
             if response.status_code == 200:
                 break
             elif response.status_code == 429:
-                stdout.write('\n')
                 print response.content
+                retries += 1
+                print 'going to retry'
                 sleep(5)
         return Response(response)
 
@@ -116,95 +118,106 @@ def open_sheet(file_name):
     sheet = open_workbook(read_file).sheet_by_index(0)
     return sheet
 
+class Genderize():
 
-@timed
-def run(args):
+    def __init__(self, args):
+        self.read_col = args['read_col']
+        self.write_col = args['write_col']
+        self.min_probability = args['min_probability']
+        self.file = args['file']
+        self.read_sheet = open_sheet(self.file)
 
-    read_col = args['read_col']
-    write_col = args['write_col']
-    min_probability = args['min_probability']
+    def read(self):
+        client = Client()
+        data = []
+        chunk_size = 50
+        sheet_rows = self.read_sheet.nrows
+        chunks = (sheet_rows / chunk_size) + (sheet_rows % chunk_size)
 
-    print '-'*80
-    print 'Reading'
-    print '-'*80
+        for chunk in xrange(chunks):
 
-    # read
+            params = OrderedDict()
 
-    client = Client()
-    read_sheet = open_sheet(args['file'])
-    data = []
-    chunck_size = 100
-    sheet_rows = read_sheet.nrows
-    chunks = (sheet_rows / chunck_size) + (sheet_rows % chunck_size)
+            for chunk_item in xrange(chunk_size):
+                row_num = (chunk * chunk_size) + chunk_item
+                if row_num > sheet_rows:
+                    break
 
-    for chunk in xrange(chunks):
+                try:
+                    name = self.read_sheet.row(row_num)[self.read_col].value.lower()
+                    params['name[{}]'.format(chunk_item)] = name
+                except IndexError:
+                    pass
 
-        params = OrderedDict()
-
-        for chunk_item in xrange(chunck_size):
-            row_num = (chunk * chunck_size) + chunk_item
-            if row_num > sheet_rows:
-                break
-
+            # send request
+            # we are going to catch any error and write whatever we have done.
             try:
-                name = read_sheet.row(row_num)[read_col].value.lower()
-                params['name[{}]'.format(chunk_item)] = name
-            except IndexError:
-                pass
+                try:
+                    response = client.curl('GET', params)
+                except ConnectionError:
+                    client = Client()
+                    response = client.curl('GET', params)
+            except:
+                print 'failed while at row {}. writing what we got'.format(chunk * chunk_size)
+                return data
 
-        # send request
-        try:
-            response = client.curl('GET', params)
-        except ConnectionError:
-            client = Client()
-            response = client.curl('GET', params)
+            # match request with row
+            for chunk_item, res in zip(xrange(chunk_size), response.content):
+                current_row = (chunk * chunk_size) + chunk_item
+                if current_row > sheet_rows:
+                    break
 
-        # match request with row
-        for chunk_item, res in zip(xrange(chunck_size), response.content):
-            current_row = (chunk * chunck_size) + chunk_item
-            if current_row > sheet_rows:
-                break
+                row = []
+                for cell in self.read_sheet.row(current_row):
+                    if cell.ctype == 5:
+                        row.append('')
+                    else:
+                        row.append(str(cell.value).rstrip('.0'))
 
-            row = []
-            for cell in read_sheet.row(current_row):
-                if cell.ctype == 5:
-                    row.append('')
+                if res.get('probability'):
+                    probability = int(float(res.get('probability'))*100)
                 else:
-                    row.append(str(cell.value).rstrip('.0'))
+                    probability = 0
+                if probability >= self.min_probability:
+                    if self.write_col:
+                        if not row[self.write_col]:
+                            row[self.write_col] = res.get('gender')[0].upper()
+                    else:
+                        row.append(res.get('gender')[0].upper())
 
-            if res.get('probability'):
-                probability = int(float(res.get('probability'))*100)
-            else:
-                probability = 0
-            if probability >= min_probability:
-                if write_col:
-                    if not row[write_col]:
-                        row[write_col] = res.get('gender')[0].upper()
-                else:
-                    row.append(res.get('gender')[0].upper())
+                data.append(row)
 
-            data.append(row)
+            stdout.write('\r\t{} / {}'.format(row_num, self.read_sheet.nrows))
+            stdout.flush()
+        stdout.write('\n')
 
-        stdout.write('\r\t{} / {}'.format(row_num, read_sheet.nrows))
-        stdout.flush()
-    stdout.write('\n')
+        return data
 
-    print '-'*80
-    print 'Writing'
-    print '-'*80
+    def write(self, data):
+        workbook = xlwt.Workbook()
+        write_sheet = workbook.add_sheet("Sheet1", cell_overwrite_ok=True)
 
-    workbook = xlwt.Workbook()
-    write_sheet = workbook.add_sheet("Sheet1", cell_overwrite_ok=True)
+        for y, row in enumerate(data):
+            for x, cell in enumerate(row):
+                write_sheet.write(y, x, cell)
+            stdout.write('\r {} / {}'.format(y, self.read_sheet.nrows))
+            stdout.flush()
+        stdout.write('\n')
 
-    for y, row in enumerate(data):
-        for x, cell in enumerate(row):
-            write_sheet.write(y, x, cell)
-        stdout.write('\r {} / {}'.format(y, read_sheet.nrows))
-        stdout.flush()
-    stdout.write('\n')
+        workbook.save('{}_genderized.xls'.format(basename(self.file).split('.')[0]))
 
-    workbook.save('{}_genderized.xls'.format(basename(args['file']).split('.')[0]))
+    @timed
+    def run(self):
+        print '-'*80
+        print 'Reading'
+        print '-'*80
+        data = self.read()
+        print '-'*80
+        print 'Writing'
+        print '-'*80
+        self.write(data)
 
 
 if __name__ == '__main__':
-    run(parse_args())
+    genderize = Genderize(parse_args())
+    genderize.run()
