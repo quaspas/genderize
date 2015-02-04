@@ -130,7 +130,7 @@ class Genderize():
     def read(self):
         client = Client()
         data = []
-        chunk_size = 50
+        chunk_size = 110
         sheet_rows = self.read_sheet.nrows
         chunks = (sheet_rows / chunk_size) + (sheet_rows % chunk_size)
 
