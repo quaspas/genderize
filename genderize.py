@@ -60,11 +60,9 @@ class Client(object):
             response = session.send(request)
             if response.status_code == 200:
                 break
-            elif response.status_code == 429:
-                print response.content
+            else:
                 retries += 1
-                print 'going to retry'
-                sleep(5)
+                sleep(1)
         return Response(response)
 
 
@@ -117,6 +115,7 @@ def open_sheet(file_name):
     read_file = os.path.join(os.path.dirname(__file__), '', file_name)
     sheet = open_workbook(read_file).sheet_by_index(0)
     return sheet
+
 
 class Genderize():
 
@@ -172,9 +171,8 @@ class Genderize():
                     if cell.ctype == 5:
                         row.append('')
                     else:
-                        row.append(str(cell.value).rstrip('.0'))
-
-                if res.get('probability'):
+                        row.append(str(cell.value.encode('utf-8')).rstrip('.0'))
+                if not res == 'error' and res.get('probability', None):
                     probability = int(float(res.get('probability'))*100)
                 else:
                     probability = 0
@@ -186,9 +184,10 @@ class Genderize():
                         row.append(res.get('gender')[0].upper())
 
                 data.append(row)
-
             stdout.write('\r\t{} / {}'.format(row_num, self.read_sheet.nrows))
             stdout.flush()
+            if row_num > self.read_sheet.nrows:
+                break
         stdout.write('\n')
 
         return data
