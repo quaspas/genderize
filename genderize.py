@@ -33,6 +33,7 @@ class Response(collections.Sequence):
         self.response = response
         content = response.content.decode('utf-8')
         self.content = json.loads(content)
+        self.status = response.status_code
 
     def __len__(self):
         return len(self.content)
@@ -125,20 +126,20 @@ class Genderize():
         self.min_probability = args['min_probability']
         self.file = args['file']
         self.read_sheet = open_sheet(self.file)
+        self.chunk_size = 110
 
     def read(self):
         client = Client()
         data = []
-        chunk_size = 110
         sheet_rows = self.read_sheet.nrows
-        chunks = (sheet_rows / chunk_size) + (sheet_rows % chunk_size)
+        chunks = (sheet_rows / self.chunk_size) + (sheet_rows % self.chunk_size)
 
         for chunk in xrange(chunks):
 
             params = OrderedDict()
 
-            for chunk_item in xrange(chunk_size):
-                row_num = (chunk * chunk_size) + chunk_item
+            for chunk_item in xrange(self.chunk_size):
+                row_num = (chunk * self.chunk_size) + chunk_item +1
                 if row_num > sheet_rows:
                     break
 
@@ -157,17 +158,21 @@ class Genderize():
                     client = Client()
                     response = client.curl('GET', params)
             except:
-                print 'failed while at row {}. writing what we got'.format(chunk * chunk_size)
+                print 'failed while at row {}. writing what we got'.format(chunk * self.chunk_size)
                 return data
 
             # match request with row
-            for chunk_item, res in zip(xrange(chunk_size), response.content):
-                current_row = (chunk * chunk_size) + chunk_item
+            for chunk_item, res in zip(xrange(self.chunk_size), response.content):
+                current_row = (chunk * self.chunk_size) + chunk_item + 1
                 if current_row > sheet_rows:
                     break
 
                 row = []
-                for cell in self.read_sheet.row(current_row):
+                try:
+                    cells = self.read_sheet.row(current_row)
+                except IndexError:
+                    cells = []
+                for cell in cells:
                     if cell.ctype == 5:
                         row.append('')
                     else:
@@ -182,8 +187,7 @@ class Genderize():
                             row[self.write_col] = res.get('gender')[0].upper()
                     else:
                         row.append(res.get('gender')[0].upper())
-
-                data.append(row)
+                    data.append(row)
             stdout.write('\r\t{} / {}'.format(row_num, self.read_sheet.nrows))
             stdout.flush()
             if row_num > self.read_sheet.nrows:
