@@ -120,6 +120,8 @@ def open_sheet(file_name):
 
 class Genderize():
 
+    below_min_probability = 0
+
     def __init__(self, args):
         self.read_col = args['read_col']
         self.write_col = args['write_col']
@@ -133,7 +135,7 @@ class Genderize():
         data = []
         sheet_rows = self.read_sheet.nrows
         chunks = (sheet_rows / self.chunk_size) + (sheet_rows % self.chunk_size)
-
+        print 'row, name, gender, probability'
         for chunk in xrange(chunks):
 
             params = OrderedDict()
@@ -178,8 +180,12 @@ class Genderize():
                     else:
                         row.append(str(cell.value.encode('utf-8')).rstrip('.0'))
                 if not res == 'error' and res.get('probability', None):
+                    name = res.get('name')
+                    gender = res.get('gender')
                     probability = int(float(res.get('probability'))*100)
                 else:
+                    name = 'response error'
+                    gender = '?'
                     probability = 0
                 if probability >= self.min_probability:
                     if self.write_col:
@@ -188,12 +194,11 @@ class Genderize():
                     else:
                         row.append(res.get('gender')[0].upper())
                     data.append(row)
-            stdout.write('\r\t{} / {}'.format(row_num, self.read_sheet.nrows))
-            stdout.flush()
+                else:
+                    self.below_min_probability += 1
+                print '{}, {}, {}, {}'.format(row_num, name, gender, probability)
             if row_num > self.read_sheet.nrows:
                 break
-        stdout.write('\n')
-
         return data
 
     def write(self, data):
@@ -215,6 +220,8 @@ class Genderize():
         print 'Reading'
         print '-'*80
         data = self.read()
+        print
+        print '{} names below {}% probability'.format(self.below_min_probability, self.min_probability)
         print '-'*80
         print 'Writing'
         print '-'*80
