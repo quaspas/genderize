@@ -4,9 +4,10 @@ import os
 import argparse
 import json
 import collections
+import ntpath
 from time import sleep
+import datetime
 
-from xlrd import open_workbook
 from requests.models import Request
 from requests.sessions import Session
 
@@ -98,12 +99,6 @@ def parse_args():
     return vars(parser.parse_args())
 
 
-def open_sheet(file_name):
-    read_file = os.path.join(os.path.dirname(__file__), '', file_name)
-    sheet = open_workbook(read_file).sheet_by_index(0)
-    return sheet
-
-
 _CACHE = {}
 
 
@@ -117,7 +112,7 @@ def set_cache(name, gender, p):
 
 def interpret_result(result):
     name = result['name']
-    gender = '' if result['name'] is None else result['name']
+    gender = '' if result['gender'] is None else result['gender']
     probability = result.get('probability', 0)
     return name, gender, probability
 
@@ -215,6 +210,16 @@ def run():
 
         print '-'*20
         print RESULTS
+
+        file_name = ntpath.basename(file).rstrip('.csv')
+        timestamp = datetime.datetime.now().strftime('%d%m%y-%H%m')
+        new_file_name = '{}_{}.csv'.format(file_name, timestamp)
+        new_file = os.path.join(os.path.dirname(__file__), new_file_name)
+        with open(new_file, 'wb') as csvfile:
+            writer = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+            for row_num in xrange(2, len(RESULTS)):
+                writer.writerow(RESULTS[row_num])
+
 
 if __name__ == '__main__':
     run()
