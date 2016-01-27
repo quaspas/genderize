@@ -31,7 +31,6 @@ class Response(collections.Sequence):
             yield content
 
 
-
 class Client(object):
 
     SCHEME = 'http'
@@ -133,7 +132,10 @@ def find_name_column(first_row):
 
 
 def next_row(reader):
-    return reader.next(), reader.line_num
+    try:
+        return reader.next(), reader.line_num
+    except StopIteration:
+        return None, None
 
 
 def build_params(name, params):
@@ -144,15 +146,15 @@ def build_params(name, params):
 
 
 def map_name_to_row(name, n, mapping):
-    if mapping.get(name, False):
-        map_name_to_row(name+name, n, mapping)
-    mapping[name] = n
+    if mapping.get(name+'_'):
+        map_name_to_row(name+'_'+name, n, mapping)
+    mapping[name+'_'] = n
     return mapping
 
 
 def retrieve_row_with_name(name, mapping):
     for k, v in mapping.items():
-        if name in k:
+        if name+'_' in k:
             return mapping.pop(k)
 
 
@@ -167,57 +169,73 @@ def pair_results_with_rows(results, mapping):
 
 def run():
     args = parse_args()
-    read_col = args['read_col']
-    write_col = args['write_col']
-    min_probability = args['min_probability']
     file = args['file']
-
     client = Client()
-
     RESULTS = {} # {'row_num': ['name', 'gender', 'probability']}
 
-    name_to_row_map = {}
-
-    with open(file, 'rb') as csvfile:
-        reader = csv.reader(csvfile, delimiter=' ', quotechar='|')
+    with open(file, 'rU') as csvfile:
+        reader = csv.reader(csvfile, dialect=csv.excel_tab)
         name_col = find_name_column(reader.next())
 
         # GET https://api.genderize.io/?name[0]=peter&name[1]=lois&name[2]=stevie
         params = {} # build up to 10 name params before query
+        name_to_row_map = {}
+        try:
+            while True:
 
-        while True:
+                if len(params) >= 10:
+                    # requests may get rate limited
+                    response = client.curl('get', params=params)
+                    if response.status != 200:
+                        print response.status, response.content
+                        break
 
-            if len(params) >= 10:
-                response = client.curl('get', params=params)
-                set_cache_results_list(response)
-                pairs = pair_results_with_rows(response, name_to_row_map)
-                for pair in pairs:
-                    row, results = pair[0], pair[1]
-                    RESULTS[row] = results
-                break
+                    set_cache_results_list(response)
 
-            row, n = next_row(reader)
-            name = row[0].split(',')[name_col].lower()
-            print n, name
+                    pairs = pair_results_with_rows(response, name_to_row_map)
+                    for pair in pairs:
+                        finished_row, results = pair[0], pair[1]
+                        RESULTS[finished_row] = results
+                    # clean up for ne params
+                    params = {}
+                    name_to_row_map = {}
 
-            cached_result = check_cache(name)
+                # read a new row
+                row, n = next_row(reader)
+                if not row:
+                    # requests may get rate limited
+                    response = client.curl('get', params=params)
+                    if response.status != 200:
+                        print response.status, response.content
+                        break
+                    set_cache_results_list(response)
+                    pairs = pair_results_with_rows(response, name_to_row_map)
+                    for pair in pairs:
+                        finished_row, results = pair[0], pair[1]
+                        RESULTS[finished_row] = results
+                    break
 
-            if cached_result is not None:
-                RESULTS[n] = cached_result
+                name = row[0].split(',')[name_col].lower()
+                print n, name
 
-            build_params(name, params)
-            map_name_to_row(name, n, name_to_row_map)
+                cached_result = check_cache(name)
+                if cached_result is not None:
+                    RESULTS[n] = cached_result
+                else:
+                    build_params(name, params)
+                    map_name_to_row(name, n, name_to_row_map)
+        except Exception as e:
+            # If we fail we still want to write whatever we had
+            print e
 
-        print '-'*20
-        print RESULTS
-
+        # write
         file_name = ntpath.basename(file).rstrip('.csv')
         timestamp = datetime.datetime.now().strftime('%d%m%y-%H%m')
         new_file_name = '{}_{}.csv'.format(file_name, timestamp)
         new_file = os.path.join(os.path.dirname(__file__), new_file_name)
         with open(new_file, 'wb') as csvfile:
             writer = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-            for row_num in xrange(2, len(RESULTS)):
+            for row_num in xrange(2, len(RESULTS) + 1):
                 writer.writerow(RESULTS[row_num])
 
 

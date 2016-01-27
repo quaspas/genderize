@@ -4,7 +4,8 @@ from unittest.case import TestCase
 
 import httpretty
 
-from genderize import Client, set_cache, _CACHE, check_cache, find_name_column, build_params, retrieve_row_with_name
+from genderize import Client, set_cache, _CACHE, check_cache, find_name_column, build_params, retrieve_row_with_name, \
+    map_name_to_row
 
 
 class TestMixin(TestCase):
@@ -93,6 +94,12 @@ class Tests(TestCase):
         actual = build_params('bob', params)
         expected = {'name[0]':'ann', 'name[1]':'bob'}
         self.assertDictContainsSubset(expected, actual)
+
+    def test_set_row_with_name(self):
+        map = {}
+        map_name_to_row('a', 1, map)
+        map_name_to_row('a', 2, map)
+        self.assertEquals(len(map), 2)
 
     def test_retrieve_row_with_name_dupes(self):
         mapping = {
