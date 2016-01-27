@@ -1,4 +1,2 @@
 requests==2.5.1
-xlrd==0.9.3
-xlwt==0.7.5
 httpretty==0.8.8

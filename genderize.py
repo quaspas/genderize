@@ -1,30 +1,14 @@
 # coding: utf-8
-from collections import OrderedDict
+import csv
 import os
 import argparse
 import json
 import collections
-import datetime
-from sys import stdout
 from time import sleep
-from os.path import basename
 
-from requests.exceptions import ConnectionError
-import xlwt
 from xlrd import open_workbook
 from requests.models import Request
 from requests.sessions import Session
-
-
-def timed(method):
-    def wrapper(*args, **kw):
-        start = datetime.datetime.now()
-        result = method(*args, **kw)
-        stop = datetime.datetime.now()
-        time = (stop - start).seconds
-        print '\tCompleted: {} Time: {} seconds'.format(method.__name__, time)
-        return result
-    return wrapper
 
 
 class Response(collections.Sequence):
@@ -41,8 +25,10 @@ class Response(collections.Sequence):
     def __getitem__(self, index):
         return self.content[index]
 
+    def __iter__(self):
+        for content in self.content:
+            yield content
 
-_CACHE = {}
 
 
 class Client(object):
@@ -118,116 +104,117 @@ def open_sheet(file_name):
     return sheet
 
 
-class Genderize():
+_CACHE = {}
 
-    below_min_probability = 0
 
-    def __init__(self, args):
-        self.read_col = args['read_col']
-        self.write_col = args['write_col']
-        self.min_probability = args['min_probability']
-        self.file = args['file']
-        self.read_sheet = open_sheet(self.file)
-        self.chunk_size = 110
+def check_cache(name):
+    return _CACHE.get(name.lower(), None)
 
-    def read(self):
-        client = Client()
-        data = []
-        sheet_rows = self.read_sheet.nrows
-        chunks = (sheet_rows / self.chunk_size) + (sheet_rows % self.chunk_size)
-        print 'row, name, gender, probability'
-        for chunk in xrange(chunks):
 
-            params = OrderedDict()
+def set_cache(name, gender, p):
+    _CACHE[name.lower()] = [gender.lower(), p]
 
-            for chunk_item in xrange(self.chunk_size):
-                row_num = (chunk * self.chunk_size) + chunk_item +1
-                if row_num > sheet_rows:
-                    break
 
-                try:
-                    name = self.read_sheet.row(row_num)[self.read_col].value.lower()
-                    params['name[{}]'.format(chunk_item)] = name
-                except IndexError:
-                    pass
+def interpret_result(result):
+    name = result['name']
+    gender = '' if result['name'] is None else result['name']
+    probability = result.get('probability', 0)
+    return name, gender, probability
 
-            # send request
-            # we are going to catch any error and write whatever we have done.
-            try:
-                try:
-                    response = client.curl('GET', params)
-                except ConnectionError:
-                    client = Client()
-                    response = client.curl('GET', params)
-            except:
-                print 'failed while at row {}. writing what we got'.format(chunk * self.chunk_size)
-                return data
 
-            # match request with row
-            for chunk_item, res in zip(xrange(self.chunk_size), response.content):
-                current_row = (chunk * self.chunk_size) + chunk_item + 1
-                if current_row > sheet_rows:
-                    break
+def set_cache_results_list(results_list):
+    for result in results_list:
+        name, gender, p = interpret_result(result)
+        set_cache(name, gender, p)
 
-                row = []
-                try:
-                    cells = self.read_sheet.row(current_row)
-                except IndexError:
-                    cells = []
-                for cell in cells:
-                    if cell.ctype == 5:
-                        row.append('')
-                    else:
-                        row.append(str(cell.value.encode('utf-8')).rstrip('.0'))
-                if not res == 'error' and res.get('probability', None):
-                    name = res.get('name')
-                    gender = res.get('gender')
-                    probability = int(float(res.get('probability'))*100)
-                else:
-                    name = 'response error'
-                    gender = '?'
-                    probability = 0
-                if probability >= self.min_probability:
-                    if self.write_col:
-                        if not row[self.write_col]:
-                            row[self.write_col] = res.get('gender')[0].upper()
-                    else:
-                        row.append(res.get('gender')[0].upper())
-                    data.append(row)
-                else:
-                    self.below_min_probability += 1
-                print '{}, {}, {}, {}'.format(row_num, name, gender, probability)
-            if row_num > self.read_sheet.nrows:
+
+def find_name_column(first_row):
+    row = first_row[0]
+    row = row.lower().split(',')
+    for n, header in enumerate(row):
+        if 'name' in header and 'last' not in header:
+            return n
+    print "No 'name' column found."
+
+
+def next_row(reader):
+    return reader.next(), reader.line_num
+
+
+def build_params(name, params):
+    n = len(params)
+    key = 'name[{}]'.format(n)
+    params[key] = name
+    return params
+
+
+def map_name_to_row(name, n, mapping):
+    if mapping.get(name, False):
+        map_name_to_row(name+name, n, mapping)
+    mapping[name] = n
+    return mapping
+
+
+def retrieve_row_with_name(name, mapping):
+    for k, v in mapping.items():
+        if name in k:
+            return mapping.pop(k)
+
+
+def pair_results_with_rows(results, mapping):
+    assert len(results) == len(mapping), "Results: {} Map: {}".format(len(results), len(mapping))
+    pairs = []
+    for result in results:
+        row = retrieve_row_with_name(result['name'], mapping)
+        pairs.append([int(row), interpret_result(result)])
+    return pairs
+
+
+def run():
+    args = parse_args()
+    read_col = args['read_col']
+    write_col = args['write_col']
+    min_probability = args['min_probability']
+    file = args['file']
+
+    client = Client()
+
+    RESULTS = {} # {'row_num': ['name', 'gender', 'probability']}
+
+    name_to_row_map = {}
+
+    with open(file, 'rb') as csvfile:
+        reader = csv.reader(csvfile, delimiter=' ', quotechar='|')
+        name_col = find_name_column(reader.next())
+
+        # GET https://api.genderize.io/?name[0]=peter&name[1]=lois&name[2]=stevie
+        params = {} # build up to 10 name params before query
+
+        while True:
+
+            if len(params) >= 10:
+                response = client.curl('get', params=params)
+                set_cache_results_list(response)
+                pairs = pair_results_with_rows(response, name_to_row_map)
+                for pair in pairs:
+                    row, results = pair[0], pair[1]
+                    RESULTS[row] = results
                 break
-        return data
 
-    def write(self, data):
-        workbook = xlwt.Workbook()
-        write_sheet = workbook.add_sheet("Sheet1", cell_overwrite_ok=True)
+            row, n = next_row(reader)
+            name = row[0].split(',')[name_col].lower()
+            print n, name
 
-        for y, row in enumerate(data):
-            for x, cell in enumerate(row):
-                write_sheet.write(y, x, cell)
-            stdout.write('\r {} / {}'.format(y, self.read_sheet.nrows))
-            stdout.flush()
-        stdout.write('\n')
+            cached_result = check_cache(name)
 
-        workbook.save('{}_genderized.xls'.format(basename(self.file).split('.')[0]))
+            if cached_result is not None:
+                RESULTS[n] = cached_result
 
-    @timed
-    def run(self):
-        print '-'*80
-        print 'Reading'
-        print '-'*80
-        data = self.read()
-        print
-        print '{} names below {}% probability'.format(self.below_min_probability, self.min_probability)
-        print '-'*80
-        print 'Writing'
-        print '-'*80
-        self.write(data)
+            build_params(name, params)
+            map_name_to_row(name, n, name_to_row_map)
 
+        print '-'*20
+        print RESULTS
 
 if __name__ == '__main__':
-    genderize = Genderize(parse_args())
-    genderize.run()
+    run()

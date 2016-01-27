@@ -1,29 +1,20 @@
 import os
 import re
 from unittest.case import TestCase
+
 import httpretty
 
-import xlwt
-
-from genderize import Client, Genderize
+from genderize import Client, set_cache, _CACHE, check_cache, find_name_column, build_params, retrieve_row_with_name
 
 
 class TestMixin(TestCase):
     path = os.path.dirname(os.path.realpath(__file__))
     test_file = 'test.xls'
+    data = [['name', ],]
+    data.extend([['daniel', ], ['cristina', ], ['cassandra', ], ] * 3)
 
     def _write(self):
-        data = [
-                   ['daniel', ''],
-                   ['cristina', ''],
-                   ['cassandra', ''],
-               ] * 3
-        workbook = xlwt.Workbook()
-        write_sheet = workbook.add_sheet("Sheet1", cell_overwrite_ok=True)
-        for y, row in enumerate(data):
-            for x, cell in enumerate(row):
-                write_sheet.write(y, x, cell)
-        workbook.save('{}/{}'.format(self.path, self.test_file))
+        pass
 
     def setUp(self):
         self._write()
@@ -73,22 +64,42 @@ class TestAPiClient(TestCase):
         self.assertEqual(res.status, 200)
 
 
-class TestRead(TestMixin, TestAPiClient):
+class Tests(TestCase):
 
-    @httpretty.activate
-    def test_(self):
-        httpretty.register_uri(
-            httpretty.GET,
-            re.compile("http:\/\/api\.genderize\.io\/.*$"),
-            body=self.response_200,
-            content_type="application/json"
-        )
-        gen = Genderize(self.args)
-        gen.chunk_size = 3
-        data = gen.read()
-        print data
+    def test_set_cache(self):
+        set_cache('Ann', 'Female', '1.00')
+        self.assertDictContainsSubset({'ann': ['female', '1.00']},_CACHE)
 
+    def test_retrieve_cache(self):
+        set_cache('Ann', 'Female', '1.00')
+        self.assertIsNotNone(check_cache('Ann'))
 
-class TestWrite(TestMixin):
-    pass
+    def test_find_header(self):
+        actual = find_name_column(['LoadId,Salutation,FirstName,LastName'])
+        self.assertEquals(actual, 2)
 
+    def test_find_header_no_name(self):
+        actual = find_name_column(['LoadId,Salutation,LastName'])
+        self.assertIsNone(actual)
+
+    def test_build_new_params(self):
+        params = {}
+        actual = build_params('ann', params)
+        expected = {'name[0]':'ann'}
+        self.assertDictContainsSubset(expected, actual)
+
+    def test_add_to_params(self):
+        params = {'name[0]':'ann'}
+        actual = build_params('bob', params)
+        expected = {'name[0]':'ann', 'name[1]':'bob'}
+        self.assertDictContainsSubset(expected, actual)
+
+    def test_retrieve_row_with_name_dupes(self):
+        mapping = {
+            'a': '1',
+            'aa': '2',
+            'aaa': '3',
+            'b': '4',
+        }
+        retrieve_row_with_name('a', mapping)
+        self.assertEquals(len(mapping), 3)
