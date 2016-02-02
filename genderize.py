@@ -60,41 +60,7 @@ def parse_args():
         '--file',
         dest='file',
         required=True,
-        help='Path to the .xsl file to be read. It will not be overwritten.'
-    )
-    parser.add_argument(
-        '-r', '--read',
-        dest='read_col',
-        type=int,
-        default=1,
-        required=False,
-        help="""
-        The column in the excel sheet that hold the name to be read
-        0 = column A, 1 = column B, etc.
-        """
-    )
-    parser.add_argument(
-        '-w', '--write',
-        dest='write_col',
-        default=False,
-        type=int,
-        required=False,
-        help="""
-        The column that results will be written into (male as M and female as F).
-        0 = column A, 1 = column B, etc.
-        If nothing is passed a column will be appended to the end of rows.
-        """
-    )
-    parser.add_argument(
-        '-p', '--prob',
-        dest='min_probability',
-        default=95,
-        type=int,
-        required=False,
-        help="""
-        The minimum probability needed to assign a gender. An integer from 0 to 100.
-        Default is 95.
-        """
+        help='Path to the .csv file to be read. It will not be overwritten.'
     )
     return vars(parser.parse_args())
 
