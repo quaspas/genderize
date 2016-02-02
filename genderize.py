@@ -65,9 +65,6 @@ def parse_args():
     return vars(parser.parse_args())
 
 
-_CACHE = {}
-
-
 def clean_probability(p):
     if not p:
         return 0
@@ -106,25 +103,12 @@ class Database(object):
         c.execute('SELECT * FROM names WHERE name=?', (name.lower(),))
         return c.fetchone()
 
-def check_cache(name):
-    return _CACHE.get(name.lower(), None)
-
-
-def set_cache(name, gender, p):
-    _CACHE[name.lower()] = [gender.lower(), p]
-
 
 def interpret_result(result):
     name = result['name']
     gender = '' if result['gender'] is None else result['gender']
     probability = result.get('probability', 0)
     return name, gender, probability
-
-
-def set_cache_results_list(results_list):
-    for result in results_list:
-        name, gender, p = interpret_result(result)
-        set_cache(name, gender, p)
 
 
 def find_name_column(first_row):
