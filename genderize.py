@@ -1,12 +1,10 @@
 # coding: utf-8
 import csv
-import os
 import argparse
 import json
 import collections
-import ntpath
 from time import sleep
-import datetime
+import sqlite3
 
 from requests.models import Request
 from requests.sessions import Session
@@ -33,12 +31,15 @@ class Response(collections.Sequence):
 
 class Client(object):
 
+    API_KEY = ''
     SCHEME = 'http'
     HOST = 'api.genderize.io'
 
     def curl(self, method, params=None):
         url = '{scheme}://{host}'.format(scheme=self.SCHEME, host=self.HOST)
         params = params or {}
+        if self.API_KEY:
+            params['apikey'] = self.API_KEY
         session = Session()
         request = Request(method, url, params=params)
         request = request.prepare()
@@ -101,6 +102,44 @@ def parse_args():
 _CACHE = {}
 
 
+def clean_probability(p):
+    if not p:
+        return 0
+    p = p.replace('.','')
+    p = p if isinstance(p, int) else int(p)
+    return p
+
+
+def setup_db():
+    conn = sqlite3.connect('genderize.db')
+    c = conn.cursor()
+    try:
+        c.execute('''CREATE TABLE names(name text, gender text, probability real)''')
+    except sqlite3.OperationalError as e:
+        print e
+    return conn
+
+
+class Database(object):
+
+    def __init__(self):
+        self.conn = setup_db()
+
+    def insert_name(self, name, gender, probability):
+        name = name.lower()
+        gender = gender.lower()
+        probability = clean_probability(probability)
+        existing_name = self.fetch(name)
+        if not existing_name:
+            c = self.conn.cursor()
+            c.execute("INSERT INTO names VALUES (?,?,?)", (name, gender, probability,))
+            self.conn.commit()
+
+    def fetch(self, name):
+        c = self.conn.cursor()
+        c.execute('SELECT * FROM names WHERE name=?', (name.lower(),))
+        return c.fetchone()
+
 def check_cache(name):
     return _CACHE.get(name.lower(), None)
 
@@ -138,11 +177,15 @@ def next_row(reader):
         return None, None
 
 
-def build_params(name, params):
+def build_names_params(name, params):
     n = len(params)
     key = 'name[{}]'.format(n)
     params[key] = name
     return params
+
+
+def build_name_param(name):
+    return {'name': name.lower()}
 
 
 def map_name_to_row(name, n, mapping):
@@ -170,74 +213,21 @@ def pair_results_with_rows(results, mapping):
 def run():
     args = parse_args()
     file = args['file']
+    db = Database()
     client = Client()
-    RESULTS = {} # {'row_num': ['name', 'gender', 'probability']}
-
     with open(file, 'rU') as csvfile:
         reader = csv.reader(csvfile, dialect=csv.excel_tab)
         name_col = find_name_column(reader.next())
-
-        # GET https://api.genderize.io/?name[0]=peter&name[1]=lois&name[2]=stevie
-        params = {} # build up to 10 name params before query
-        name_to_row_map = {}
-        try:
-            while True:
-
-                if len(params) >= 10:
-                    # requests may get rate limited
-                    response = client.curl('get', params=params)
-                    if response.status != 200:
-                        print response.status, response.content
-                        break
-
-                    set_cache_results_list(response)
-
-                    pairs = pair_results_with_rows(response, name_to_row_map)
-                    for pair in pairs:
-                        finished_row, results = pair[0], pair[1]
-                        RESULTS[finished_row] = results
-                    # clean up for ne params
-                    params = {}
-                    name_to_row_map = {}
-
-                # read a new row
-                row, n = next_row(reader)
-                if not row:
-                    # requests may get rate limited
-                    response = client.curl('get', params=params)
-                    if response.status != 200:
-                        print response.status, response.content
-                        break
-                    set_cache_results_list(response)
-                    pairs = pair_results_with_rows(response, name_to_row_map)
-                    for pair in pairs:
-                        finished_row, results = pair[0], pair[1]
-                        RESULTS[finished_row] = results
-                    break
-
-                name = row[0].split(',')[name_col].lower()
-                print n, name
-
-                cached_result = check_cache(name)
-                if cached_result is not None:
-                    RESULTS[n] = cached_result
-                else:
-                    build_params(name, params)
-                    map_name_to_row(name, n, name_to_row_map)
-        except Exception as e:
-            # If we fail we still want to write whatever we had
-            print e
-
-        # write
-        file_name = ntpath.basename(file).rstrip('.csv')
-        timestamp = datetime.datetime.now().strftime('%d%m%y-%H%m')
-        new_file_name = '{}_{}.csv'.format(file_name, timestamp)
-        new_file = os.path.join(os.path.dirname(__file__), new_file_name)
-        with open(new_file, 'wb') as csvfile:
-            writer = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-            for row_num in xrange(2, len(RESULTS) + 1):
-                writer.writerow(RESULTS[row_num])
-
+        for row in reader:
+            name = row[0].split(',')[name_col].lower()
+            in_db = db.fetch(name)
+            if in_db:
+                continue
+            params = build_name_param(name)
+            response = client.curl('get', params=params)
+            print reader.line_num, response.content
+            n, g, p = interpret_result(response.content)
+            db.insert_name(n, g, p)
 
 if __name__ == '__main__':
     run()

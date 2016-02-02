@@ -4,8 +4,8 @@ from unittest.case import TestCase
 
 import httpretty
 
-from genderize import Client, set_cache, _CACHE, check_cache, find_name_column, build_params, retrieve_row_with_name, \
-    map_name_to_row
+from genderize import Client, set_cache, _CACHE, check_cache, find_name_column, build_names_params, retrieve_row_with_name, \
+    map_name_to_row, clean_probability
 
 
 class TestMixin(TestCase):
@@ -85,13 +85,13 @@ class Tests(TestCase):
 
     def test_build_new_params(self):
         params = {}
-        actual = build_params('ann', params)
+        actual = build_names_params('ann', params)
         expected = {'name[0]':'ann'}
         self.assertDictContainsSubset(expected, actual)
 
     def test_add_to_params(self):
         params = {'name[0]':'ann'}
-        actual = build_params('bob', params)
+        actual = build_names_params('bob', params)
         expected = {'name[0]':'ann', 'name[1]':'bob'}
         self.assertDictContainsSubset(expected, actual)
 
@@ -110,3 +110,23 @@ class Tests(TestCase):
         }
         retrieve_row_with_name('a', mapping)
         self.assertEquals(len(mapping), 3)
+
+    def test_clean_probability_none(self):
+        p, expected = None, 0
+        actual = clean_probability(p)
+        self.assertEquals(actual, expected)
+
+    def test_clean_probability_none(self):
+        p, expected = 0, 0
+        actual = clean_probability(p)
+        self.assertEquals(actual, expected)
+
+    def test_clean_probability_100(self):
+        p, expected = '1.00', 100
+        actual = clean_probability(p)
+        self.assertEquals(actual, expected)
+
+    def test_clean_probability_80(self):
+        p, expected = '0.80', 80
+        actual = clean_probability(p)
+        self.assertEquals(actual, expected)
