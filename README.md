@@ -4,15 +4,14 @@ Genderize
 What Is This?
 -------------
 
-It is a script that will read in an csv sheet and save results
-after passing a bunch of names to [genderize.io](http://genderize.io/) which does the real work.
+It is a script that will read in a csv of names, pass them to [genderize.io](http://genderize.io/) and then save the results to a SQLite db so you can out put them however you like.
 
 How Do I Run It?
 ----------------
 
-    >> python genderize.py --file /path/to/my/excel_file.xls
+    >> python genderize.py --file /path/to/my/csv_file.csv
 
-This will read from the `name` column of the csv and check the genderize.io
+This will read from the `name` column of the csv.
 The results will be saved to a SQLite database `genderize.db`.
 
 
