@@ -77,11 +77,16 @@ def setup_db():
     conn = sqlite3.connect('genderize.db')
     c = conn.cursor()
     try:
-        c.execute('''CREATE TABLE names(name text, gender text, probability real)''')
+        c.execute(u'CREATE TABLE names(name text, gender text, probability real)')
     except sqlite3.OperationalError as e:
         print e
     return conn
 
+
+def clean_name(name):
+    name = unicode(name, errors='replace')
+    name = name.strip(' ')
+    return name
 
 class Database(object):
 
@@ -95,12 +100,12 @@ class Database(object):
         existing_name = self.fetch(name)
         if not existing_name:
             c = self.conn.cursor()
-            c.execute("INSERT INTO names VALUES (?,?,?)", (name, gender, probability,))
+            c.execute(u'INSERT INTO names VALUES (?,?,?)', (name, gender, probability,))
             self.conn.commit()
 
     def fetch(self, name):
         c = self.conn.cursor()
-        c.execute('SELECT * FROM names WHERE name=?', (name.lower(),))
+        c.execute(u'SELECT * FROM names WHERE name=?', (name.lower(),))
         return c.fetchone()
 
 
@@ -170,6 +175,7 @@ def run():
         name_col = find_name_column(reader.next())
         for row in reader:
             name = row[0].split(',')[name_col].lower()
+            name = clean_name(name)
             in_db = db.fetch(name)
             if in_db:
                 continue
