@@ -5,6 +5,7 @@ import json
 import collections
 from time import sleep
 import sqlite3
+from datetime import datetime
 
 from requests.models import Request
 from requests.sessions import Session
@@ -62,6 +63,15 @@ def parse_args():
         required=True,
         help='Path to the .csv file to be read. It will not be overwritten.'
     )
+    parser.add_argument(
+        '-o',
+        '--output',
+        dest='output_csv',
+        action='store_true',
+        required=False,
+        default=False,
+        help='Flag to create csv of results.'
+    )
     return vars(parser.parse_args())
 
 
@@ -79,7 +89,7 @@ def setup_db():
     try:
         c.execute(u'CREATE TABLE names(name text, gender text, probability real)')
     except sqlite3.OperationalError as e:
-        print e
+        pass
     return conn
 
 
@@ -165,9 +175,7 @@ def pair_results_with_rows(results, mapping):
     return pairs
 
 
-def run():
-    args = parse_args()
-    file = args['file']
+def run_gender(file):
     db = Database()
     client = Client()
     with open(file, 'rU') as csvfile:
@@ -184,6 +192,40 @@ def run():
             print reader.line_num, response.content
             n, g, p = interpret_result(response.content)
             db.insert_name(n, g, p)
+
+
+def make_csv(file):
+    db = Database()
+    new_file = 'genderize-{}.csv'.format(datetime.now().strftime('%b%d%y-%s')).lower()
+    print '\tcreating {}'.format(new_file)
+    with open(file, 'rU') as csvfile:
+        reader = csv.reader(csvfile, dialect=csv.excel_tab)
+        name_col = find_name_column(reader.next())
+        with open(new_file, 'w') as csvfile:
+            fieldnames = ['name', 'gender', 'probability']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in reader:
+                name = row[0].split(',')[name_col].lower()
+                name = clean_name(name)
+                db_result = db.fetch(name)
+                if not db_result:
+                    continue
+                writer.writerow({
+                    'name': db_result[0],
+                    'gender': db_result[1],
+                    'probability': int(db_result[2]),
+                })
+
+
+def run():
+    args = parse_args()
+    file = args['file']
+    if args['output_csv']:
+        make_csv(file)
+    else:
+        run_gender(file)
+
 
 if __name__ == '__main__':
     run()
