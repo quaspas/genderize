@@ -14,6 +14,12 @@ How Do I Run It?
 This will read from the `name` column of the csv.
 The results will be saved to a SQLite database `genderize.db`.
 
+You can output a csv with all of the gender information you have collected with the `-o` flag:
+
+    >> python genderize.py --file /path/to/my/csv_file.csv -o
+
+This will create a new csv using already collected gender info (which means you will need to have first run without the `-o` flag)
+
 
 *NOTE:* You will need some python packages to run this. Easiest way to get them is to install using `pip`.
 
