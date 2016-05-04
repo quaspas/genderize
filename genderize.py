@@ -85,7 +85,8 @@ def setup_db():
 
 
 def clean_name(name):
-    name = unicode(name, errors='replace')
+    if not isinstance(name, unicode):
+        name = unicode(name, errors='replace')
     name = name.strip(' ')
     return name
 
@@ -216,12 +217,12 @@ def run():
             params = build_name_param(name)
             response = client.curl('get', params=params)
             n, g, p = interpret_result(response.content)
-            print('{}, {}, {}, {}'.format(reader.line_num, n, g , p))
+            print('{}, {}, {}, {}'.format(reader.line_num, n, g, p))
             db.insert_name(n, g, p)
             writer.writerow({
-                'name': n,
+                'name': clean_name(n),
                 'gender': g,
-                'probability': int(p),
+                'probability': clean_probability(p),
             })
     print '\tcreated {}'.format(new_file)
 
