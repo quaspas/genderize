@@ -63,15 +63,6 @@ def parse_args():
         required=True,
         help='Path to the .csv file to be read. It will not be overwritten.'
     )
-    parser.add_argument(
-        '-o',
-        '--output',
-        dest='output_csv',
-        action='store_true',
-        required=False,
-        default=False,
-        help='Flag to create csv of results.'
-    )
     return vars(parser.parse_args())
 
 
@@ -175,25 +166,6 @@ def pair_results_with_rows(results, mapping):
     return pairs
 
 
-def run_gender(file):
-    db = Database()
-    client = Client()
-    with open(file, 'rU') as csvfile:
-        reader = csv.reader(csvfile, dialect=csv.excel_tab)
-        name_col = find_name_column(reader.next())
-        for row in reader:
-            name = row[0].split(',')[name_col].lower()
-            name = clean_name(name)
-            in_db = db.fetch(name)
-            if in_db:
-                continue
-            params = build_name_param(name)
-            response = client.curl('get', params=params)
-            print reader.line_num, response.content
-            n, g, p = interpret_result(response.content)
-            db.insert_name(n, g, p)
-
-
 def make_csv(file):
     db = Database()
     new_file = 'genderize-{}.csv'.format(datetime.now().strftime('%b%d%y-%s')).lower()
@@ -221,10 +193,37 @@ def make_csv(file):
 def run():
     args = parse_args()
     file = args['file']
-    if args['output_csv']:
-        make_csv(file)
-    else:
-        run_gender(file)
+    db = Database()
+    client = Client()
+    new_file = 'genderize-{}.csv'.format(datetime.now().strftime('%b%d%y-%s')).lower()
+    with open(file, 'rU') as read_csvfile, open(new_file, 'w') as write_csvfile:
+        reader = csv.reader(read_csvfile, dialect=csv.excel_tab)
+        name_col = find_name_column(reader.next())
+        fieldnames = ['name', 'gender', 'probability']
+        writer = csv.DictWriter(write_csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in reader:
+            name = row[0].split(',')[name_col].lower()
+            name = clean_name(name)
+            in_db = db.fetch(name)
+            if in_db:
+                writer.writerow({
+                    'name': in_db[0],
+                    'gender': in_db[1],
+                    'probability': int(in_db[2]),
+                })
+                continue
+            params = build_name_param(name)
+            response = client.curl('get', params=params)
+            n, g, p = interpret_result(response.content)
+            print('{}, {}, {}, {}'.format(reader.line_num, n, g , p))
+            db.insert_name(n, g, p)
+            writer.writerow({
+                'name': n,
+                'gender': g,
+                'probability': int(p),
+            })
+    print '\tcreated {}'.format(new_file)
 
 
 if __name__ == '__main__':
